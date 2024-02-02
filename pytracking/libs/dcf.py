@@ -4,6 +4,18 @@ from pytracking import fourier
 from pytracking import complex
 import torch.nn.functional as F
 
+try:
+    from torch import irfft
+    from torch import rfft
+except ImportError:
+    from torch.fft import irfft2
+    from torch.fft import rfft2
+    def rfft(x, d):
+        t = rfft2(x, dim = (-d,-1))
+        return torch.stack((t.real, t.imag), -1)
+    def irfft(x, d, signal_sizes):
+        return irfft2(torch.complex(x[:,:,0], x[:,:,1]), s = signal_sizes, dim = (-d,-1))
+
 
 def hann1d(sz: int, centered = True) -> torch.Tensor:
     """1D cosine window."""
@@ -131,12 +143,14 @@ def get_reg_filter(sz: torch.Tensor, target_sz: torch.Tensor, params):
                   torch.abs(wcg/reg_scale[1])**params.reg_window_power) + params.reg_window_min
 
     # Compute DFT and enforce sparsity
-    reg_window_dft = torch.rfft(reg_window, 2) / sz.prod()
+    #reg_window_dft = torch.rfft(reg_window, 2) / sz.prod()
+    reg_window_dft = rfft(reg_window, 2) / sz.prod()
     reg_window_dft_abs = complex.abs(reg_window_dft)
     reg_window_dft[reg_window_dft_abs < params.reg_sparsity_threshold * reg_window_dft_abs.max(), :] = 0
 
     # Do the inverse transform to correct for the window minimum
-    reg_window_sparse = torch.irfft(reg_window_dft, 2, signal_sizes=sz.long().tolist())
+    #reg_window_sparse = torch.irfft(reg_window_dft, 2, signal_sizes=sz.long().tolist())
+    reg_window_sparse = irfft(reg_window_dft, 2, signal_sizes=sz.long().tolist())
     reg_window_dft[0,0,0,0,0] += params.reg_window_min - sz.prod() * reg_window_sparse.min()
     reg_window_dft = complex.real(fourier.rfftshift2(reg_window_dft))
 

@@ -14,6 +14,7 @@ from ltr.data.bounding_box_utils import masks_to_bboxes
 from pytracking.evaluation.multi_object_wrapper import MultiObjectWrapper
 from pathlib import Path
 import torch
+import yaml, cv2
 
 
 _tracker_disp_colors = {1: (0, 255, 0), 2: (0, 0, 255), 3: (255, 0, 0),
@@ -257,7 +258,8 @@ class Tracker:
 
         return output
 
-    def run_video_generic(self, debug=None, visdom_info=None, videofilepath=None, optional_box=None, save_results=False):
+    def run_video_generic(self, debug=None, visdom_info=None, videofilepath=None, optional_box=None, save_results=False,
+                          save_result=False, expand_roi=False, tracker_type='none'):
         """Run the tracker with the webcam or a provided video file.
         args:
             debug: Debug level.
@@ -321,22 +323,56 @@ class Tracker:
         ui_control = UIControl()
 
         display_name = 'Display: ' + self.name
-        cv.namedWindow(display_name, cv.WINDOW_NORMAL | cv.WINDOW_KEEPRATIO)
-        cv.resizeWindow(display_name, 960, 720)
+        cv.namedWindow(display_name, cv.WINDOW_AUTOSIZE)
+        #cv.namedWindow(display_name, cv.WINDOW_NORMAL | cv.WINDOW_KEEPRATIO)
+        #cv.resizeWindow(display_name, 960, 720)
         cv.setMouseCallback(display_name, ui_control.mouse_callback)
 
         frame_number = 0
+
+        process_option = {
+            'time_range': [0,0],
+            'zoom_size': [0,0]
+        }
+        video_writer = None
+
+        if videofilepath is not None and os.path.isfile(videofilepath):
+            option_file = os.path.splitext(videofilepath)[0] + '.yaml'
+            if os.path.isfile(option_file):
+                data = open(option_file, 'r', encoding='utf-8').read()
+                process_option.update(yaml.safe_load(data))
+        
+        time_range = process_option['time_range']
+        zoom_size = process_option['zoom_size']
+        init_bbox = process_option.get('init_bbox', None)
+        if init_bbox is not None:
+            x, y, w, h = init_bbox
+            if expand_roi:
+                optional_box = [int(x-w/4), int(y-h/4), int(w*3/2), int(h*3/2)]
+            else:
+                optional_box = [x, y, w, h]
 
         if videofilepath is not None:
             assert os.path.isfile(videofilepath), "Invalid param {}".format(videofilepath)
             ", videofilepath must be a valid videofile"
             cap = cv.VideoCapture(videofilepath)
+            if isinstance(time_range, list) and  time_range[0] > 0:
+                cap.set(cv2.CAP_PROP_POS_MSEC, int(time_range[0]*1000))
             ret, frame = cap.read()
             frame_number += 1
             cv.imshow(display_name, frame)
+        
+            if save_result:
+                bbox_name = 'bbox_e' if expand_roi else 'bbox_n'
+                result_dir = os.path.join(os.path.dirname(videofilepath), 'outputs', bbox_name, tracker_type)
+                result_file = os.path.join(result_dir, os.path.basename(videofilepath))
+                os.makedirs(result_dir, exist_ok=True)
+                fourcc = cv2.VideoWriter_fourcc(*'XVID')
+                height, width = frame.shape[:2]
+                video_writer = cv2.VideoWriter(result_file, fourcc, 25, (width,height), True)
+
         else:
             cap = cv.VideoCapture(0)
-
 
         next_object_id = 1
         sequence_object_ids = []
@@ -359,7 +395,7 @@ class Tracker:
             next_object_id += 1
 
         # Wait for initial bounding box if video!
-        paused = videofilepath is not None
+        paused = False if init_bbox is not None else videofilepath is not None
 
         while True:
 
@@ -367,8 +403,14 @@ class Tracker:
                 # Capture frame-by-frame
                 ret, frame = cap.read()
                 frame_number += 1
+                if ((frame_number-2) % 10 != 0):
+                    continue 
                 if frame is None:
                     break
+                if isinstance(time_range, list):
+                    fts = cap.get(cv2.CAP_PROP_POS_MSEC) / 1000
+                    if time_range[1] > 0 and fts > time_range[1]:
+                        break
 
             frame_disp = frame.copy()
 
@@ -409,23 +451,25 @@ class Tracker:
                     for obj_id, state in out['target_bbox'].items():
                         state = [int(s) for s in state]
                         cv.rectangle(frame_disp, (state[0], state[1]), (state[2] + state[0], state[3] + state[1]),
-                                     _tracker_disp_colors[obj_id], 5)
+                                     _tracker_disp_colors[obj_id], 2)
                         if save_results:
                             output_boxes[obj_id].append(state)
 
             # Put text
             font_color = (255, 255, 255)
             msg = "Select target(s). Press 'r' to reset or 'q' to quit."
-            cv.rectangle(frame_disp, (5, 5), (630, 40), (50, 50, 50), -1)
-            cv.putText(frame_disp, msg, (10, 30), cv.FONT_HERSHEY_COMPLEX_SMALL, 1, font_color, 2)
+            #cv.rectangle(frame_disp, (5, 5), (630, 40), (50, 50, 50), -1)
+            #cv.putText(frame_disp, msg, (10, 30), cv.FONT_HERSHEY_COMPLEX_SMALL, 1, font_color, 2)
 
             if videofilepath is not None:
                 msg = "Press SPACE to pause/resume the video."
-                cv.rectangle(frame_disp, (5, 50), (530, 90), (50, 50, 50), -1)
-                cv.putText(frame_disp, msg, (10, 75), cv.FONT_HERSHEY_COMPLEX_SMALL, 1, font_color, 2)
+                #cv.rectangle(frame_disp, (5, 50), (530, 90), (50, 50, 50), -1)
+                #cv.putText(frame_disp, msg, (10, 75), cv.FONT_HERSHEY_COMPLEX_SMALL, 1, font_color, 2)
 
             # Display the resulting frame
             cv.imshow(display_name, frame_disp)
+            if video_writer is not None and not paused:
+                video_writer.write(frame_disp)
             key = cv.waitKey(1)
             if key == ord('q'):
                 break
@@ -446,6 +490,8 @@ class Tracker:
                 paused = not paused
 
         # When everything done, release the capture
+        if video_writer is not None:
+            video_writer.release()
         cap.release()
         cv.destroyAllWindows()
 

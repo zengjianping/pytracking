@@ -9,7 +9,7 @@ def parameters():
     params.debug = 0
     params.visualization = False
 
-    params.use_gpu = False
+    params.use_gpu = True
 
     # Feature specific parameters
     shallow_params = TrackerParams()
@@ -89,7 +89,7 @@ def parameters():
 
 
     fparams = FeatureParams(feature_params=[shallow_params, deep_params])
-    features = deep.Mobilenet(output_layers=['init_conv','layer5'], use_gpu=params.use_gpu, fparams=fparams,
+    features = deep.Mobilenet(output_layers=['init_conv','layer5'], net_path='mobilev3_test.t7', use_gpu=params.use_gpu, fparams=fparams,
                                pool_stride=[1, 1], normalize_power=2)
 
     params.features = MultiResolutionExtractor([features])

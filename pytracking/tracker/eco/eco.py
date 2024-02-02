@@ -271,6 +271,7 @@ class ECO(BaseTracker):
         # Get maximum
         max_score, max_disp = dcf.max2d(scores)
         _, scale_ind = torch.max(max_score, dim=0)
+        scale_ind = scale_ind.cpu()
         max_disp = max_disp.float().cpu()
 
         # Convert to displacements in the base scale

@@ -92,7 +92,7 @@ class Mobilenet(MultiFeatureBase):
     """
 
     def __init__(self, output_layers, net_path=None, use_gpu=True, *args, **kwargs):
-        super(ResNet18m1, self).__init__(*args, **kwargs)
+        super(Mobilenet, self).__init__(*args, **kwargs)
 
         for l in output_layers:
             if l not in ['init_conv','layer1', 'layer2', 'layer3', 'layer4', 'layer5','layer6','layer_out']:

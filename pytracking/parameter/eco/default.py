@@ -90,7 +90,7 @@ def parameters():
 
     fparams = FeatureParams(feature_params=[shallow_params, deep_params])
     features = deep.ResNet18m1(output_layers=['vggconv1', 'layer3'], use_gpu=params.use_gpu, fparams=fparams,
-                               pool_stride=[2, 1], normalize_power=2)
+                               pool_stride=[2, 1], normalize_power=2, net_path='resnet18_vggmconv1.pth')
 
     params.features = MultiResolutionExtractor([features])
 
