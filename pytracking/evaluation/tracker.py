@@ -403,8 +403,6 @@ class Tracker:
                 # Capture frame-by-frame
                 ret, frame = cap.read()
                 frame_number += 1
-                if ((frame_number-2) % 10 != 0):
-                    continue 
                 if frame is None:
                     break
                 if isinstance(time_range, list):
