@@ -15,11 +15,155 @@ from pytracking.evaluation.multi_object_wrapper import MultiObjectWrapper
 from pathlib import Path
 import torch
 import yaml, cv2
+import threading
+import json
+import websocket
+from queue import Queue
 
 
-_tracker_disp_colors = {1: (0, 255, 0), 2: (0, 0, 255), 3: (255, 0, 0),
-                        4: (255, 255, 255), 5: (0, 0, 0), 6: (0, 255, 128),
-                        7: (123, 123, 123), 8: (255, 128, 0), 9: (128, 0, 255)}
+_tracker_disp_colors = [(0, 255, 0), (0, 0, 255), (255, 0, 0),
+                         (0, 255, 128), (255, 128, 0), (128, 0, 255)]
+
+
+class WebSocketSender:
+    """独立线程中发送 WebSocket 消息的工具类"""
+    
+    def __init__(self, ws_url=None):
+        """
+        初始化 WebSocket 发送器
+        args:
+            ws_url: WebSocket 服务器地址，格式: ws://host:port
+        """
+        self.ws_url = ws_url
+        self.message_queue = Queue(maxsize=100)  # 限制队列大小
+        self.send_thread = None
+        self.running = False
+        self.ws_connection = None
+        
+        if ws_url:
+            self.start()
+    
+    def start(self):
+        """启动发送线程"""
+        if self.running:
+            return
+        
+        self.running = True
+        self.send_thread = threading.Thread(target=self._send_worker, daemon=True)
+        self.send_thread.start()
+        print(f"[WebSocket] 发送线程已启动，地址: {self.ws_url}")
+    
+    def _send_worker(self):
+        """发送线程的工作函数"""
+        while self.running:
+            try:
+                # 从队列获取消息（带超时以便定期检查 running 状态）
+                message = self.message_queue.get(timeout=1.0)
+                
+                if message is None:  # None 作为停止信号
+                    break
+
+                #print(f"[WebSocket] 发送消息: {message}")
+                self._send_message(message)
+                
+            except Exception as e:
+                if self.running:
+                    print(f"[WebSocket] 队列获取错误: {e}")
+                continue
+    
+    def _send_message(self, message):
+        """发送单个消息到 WebSocket 服务器"""
+        try:
+            # 连接到 WebSocket 服务器
+            ws = websocket.create_connection(self.ws_url, timeout=5)
+            ws.send(json.dumps(message))
+            ws.close()
+            
+        except Exception as e:
+            print(f"[WebSocket] 发送失败: {e}")
+    
+    def send_offset(self, frame_number, object_id, offset_x, offset_y, center_x, center_y, 
+                   image_width, image_height, confidence=None):
+        """
+        发送目标框脱靶量信息
+        args:
+            frame_number: 帧号
+            object_id: 目标 ID
+            offset_x: 目标中心相对图像中心的 X 偏移量（像素）
+            offset_y: 目标中心相对图像中心的 Y 偏移量（像素）
+            center_x: 目标中心 X 坐标
+            center_y: 目标中心 Y 坐标
+            image_width: 图像宽度
+            image_height: 图像高度
+            confidence: 置信度（可选）
+        """
+        message = {
+            'type': 'tracking_offset',
+            'frame_number': int(frame_number),
+            'object_id': int(object_id),
+            'offset': {
+                'x': float(offset_x),
+                'y': float(offset_y),
+                'distance': float(np.sqrt(offset_x**2 + offset_y**2))  # 欧氏距离
+            },
+            'target_center': {
+                'x': float(center_x),
+                'y': float(center_y)
+            },
+            'image_center': {
+                'x': float(image_width / 2),
+                'y': float(image_height / 2)
+            },
+            'image_size': {
+                'width': int(image_width),
+                'height': int(image_height)
+            },
+            'timestamp': time.time()
+        }
+        
+        if confidence is not None:
+            message['confidence'] = float(confidence)
+        
+        try:
+            self.message_queue.put_nowait(message)
+        except Exception as e:
+            print(f"[WebSocket] 队列已满或其他错误: {e}")
+    
+    def send_frame_info(self, frame_number, tracked_objects):
+        """
+        发送整帧的跟踪信息
+        args:
+            frame_number: 帧号
+            tracked_objects: 字典，格式 {object_id: {'bbox': [x,y,w,h], 'confidence': score}}
+        """
+        message = {
+            'type': 'frame_info',
+            'frame_number': int(frame_number),
+            'tracked_objects': tracked_objects,
+            'timestamp': time.time()
+        }
+        
+        try:
+            self.message_queue.put_nowait(message)
+        except Exception as e:
+            print(f"[WebSocket] 队列已满或其他错误: {e}")
+    
+    def stop(self):
+        """停止发送线程"""
+        if not self.running:
+            return
+        
+        self.running = False
+        self.message_queue.put(None)  # 发送停止信号
+        
+        if self.send_thread:
+            self.send_thread.join(timeout=5)
+        
+        print("[WebSocket] 发送线程已停止")
+    
+    def is_connected(self):
+        """检查是否已配置 WebSocket 地址"""
+        return self.ws_url is not None
 
 
 def trackerlist(name: str, parameter_name: str, run_ids = None, display_name: str = None):
@@ -44,13 +188,14 @@ class Tracker:
         display_name: Name to be displayed in the result plots.
     """
 
-    def __init__(self, name: str, parameter_name: str, run_id: int = None, display_name: str = None):
+    def __init__(self, name: str, parameter_name: str, run_id: int = None, display_name: str = None, ws_url: str = None):
         assert run_id is None or isinstance(run_id, int)
 
         self.name = name
         self.parameter_name = parameter_name
         self.run_id = run_id
         self.display_name = display_name
+        self.ws_sender = WebSocketSender(ws_url)  # 初始化 WebSocket 发送器
 
         env = env_settings()
         if self.run_id is None:
@@ -259,10 +404,12 @@ class Tracker:
         return output
 
     def run_video_generic(self, debug=None, visdom_info=None, videofilepath=None, optional_box=None, save_results=False,
-                          save_result=False, expand_roi=False, tracker_type='none'):
-        """Run the tracker with the webcam or a provided video file.
+                          save_result=False, expand_roi=False, tracker_type='none', rtsp_url=None):
+        """Run the tracker with the webcam, a provided video file, or RTSP stream.
         args:
             debug: Debug level.
+            videofilepath: Path to video file (optional).
+            rtsp_url: RTSP stream URL (optional), e.g., 'rtsp://localhost:8554/live'.
         """
 
         params = self.get_parameters()
@@ -341,10 +488,17 @@ class Tracker:
             if os.path.isfile(option_file):
                 data = open(option_file, 'r', encoding='utf-8').read()
                 process_option.update(yaml.safe_load(data))
+            else:
+                with open(option_file, 'w', encoding='utf-8') as f:
+                    yaml.safe_dump(process_option, f)
         
         time_range = process_option['time_range']
         zoom_size = process_option['zoom_size']
         init_bbox = process_option.get('init_bbox', None)
+        if init_bbox is not None:
+            x, y, w, h = init_bbox
+            if w*h == 0:
+                init_bbox = None
         if init_bbox is not None:
             x, y, w, h = init_bbox
             if expand_roi:
@@ -356,9 +510,12 @@ class Tracker:
             assert os.path.isfile(videofilepath), "Invalid param {}".format(videofilepath)
             ", videofilepath must be a valid videofile"
             cap = cv.VideoCapture(videofilepath)
+            video_source_type = 'file'
+            print(f"[INFO] 使用视频文件: {videofilepath}")
             if isinstance(time_range, list) and  time_range[0] > 0:
                 cap.set(cv2.CAP_PROP_POS_MSEC, int(time_range[0]*1000))
             ret, frame = cap.read()
+            #frame = cv.resize(frame, None, fx=2, fy=2)
             frame_number += 1
             cv.imshow(display_name, frame)
         
@@ -371,10 +528,53 @@ class Tracker:
                 height, width = frame.shape[:2]
                 video_writer = cv2.VideoWriter(result_file, fourcc, 25, (width,height), True)
 
-        else:
-            cap = cv.VideoCapture(0)
+        elif rtsp_url is not None:
+            # RTSP 流源
+            cap = cv.VideoCapture(rtsp_url)
+            video_source_type = 'rtsp'
+            print(f"[INFO] 连接到 RTSP 流: {rtsp_url}")
+            
+            # 设置 RTSP 连接参数
+            cap.set(cv.CAP_PROP_BUFFERSIZE, 1)  # 最小缓冲区，降低延迟
+            cap.set(cv.CAP_PROP_FPS, 30)  # 设置帧率
+            
+            # 尝试读取第一帧（可能需要等待连接建立）
+            max_retries = 10
+            for retry in range(max_retries):
+                ret, frame = cap.read()
+                if ret and frame is not None:
+                    frame_number += 1
+                    cv.imshow(display_name, frame)
+                    print(f"[INFO] RTSP 连接成功，开始接收视频流")
+                    break
+                else:
+                    print(f"[WARNING] RTSP 连接失败，重试 {retry + 1}/{max_retries}...")
+                    time.sleep(0.5)
+            
+            if not ret or frame is None:
+                print(f"[ERROR] 无法连接到 RTSP 流: {rtsp_url}")
+                cap.release()
+                cv.destroyAllWindows()
+                return
+            
+            if save_result:
+                bbox_name = 'bbox_e' if expand_roi else 'bbox_n'
+                # 使用 RTSP URL 作为文件名的一部分
+                stream_name = rtsp_url.split('/')[-1] or 'rtsp_stream'
+                result_dir = os.path.join(self.results_dir, 'outputs', bbox_name, tracker_type)
+                result_file = os.path.join(result_dir, f'{stream_name}.avi')
+                os.makedirs(result_dir, exist_ok=True)
+                fourcc = cv2.VideoWriter_fourcc(*'XVID')
+                height, width = frame.shape[:2]
+                video_writer = cv2.VideoWriter(result_file, fourcc, 25, (width, height), True)
 
-        next_object_id = 1
+        else:
+            # 摄像头源
+            cap = cv.VideoCapture(0)
+            video_source_type = 'camera'
+            print("[INFO] 使用网络摄像头")
+
+        next_object_id = 0
         sequence_object_ids = []
         prev_output = OrderedDict()
         output_boxes = OrderedDict()
@@ -403,12 +603,30 @@ class Tracker:
                 # Capture frame-by-frame
                 ret, frame = cap.read()
                 frame_number += 1
+                
                 if frame is None:
-                    break
-                if isinstance(time_range, list):
-                    fts = cap.get(cv2.CAP_PROP_POS_MSEC) / 1000
-                    if time_range[1] > 0 and fts > time_range[1]:
+                    if video_source_type == 'rtsp':
+                        # RTSP 流可能断开，尝试重新连接
+                        print("[WARNING] RTSP 流断开，尝试重新连接...")
+                        cap.release()
+                        time.sleep(1)
+                        cap = cv.VideoCapture(rtsp_url)
+                        cap.set(cv.CAP_PROP_BUFFERSIZE, 1)
+                        ret, frame = cap.read()
+                        if frame is None:
+                            print("[ERROR] 无法重新连接到 RTSP 流")
+                            break
+                        else:
+                            print("[INFO] RTSP 流已重新连接")
+                    else:
                         break
+                
+                #frame = cv.resize(frame, None, fx=2, fy=2)
+                if isinstance(time_range, list):
+                    if video_source_type != 'rtsp':  # RTSP 流不支持 POS_MSEC
+                        fts = cap.get(cv2.CAP_PROP_POS_MSEC) / 1000
+                        if time_range[1] > 0 and fts > time_range[1]:
+                            break
 
             frame_disp = frame.copy()
 
@@ -418,6 +636,7 @@ class Tracker:
             if ui_control.new_init:
                 ui_control.new_init = False
                 init_state = ui_control.get_bb()
+                print('### init bbox:', init_state)
 
                 info['init_object_ids'] = [next_object_id, ]
                 info['init_bbox'] = OrderedDict({next_object_id: init_state})
@@ -449,20 +668,58 @@ class Tracker:
                     for obj_id, state in out['target_bbox'].items():
                         state = [int(s) for s in state]
                         cv.rectangle(frame_disp, (state[0], state[1]), (state[2] + state[0], state[3] + state[1]),
-                                     _tracker_disp_colors[obj_id], 2)
+                                     _tracker_disp_colors[obj_id%6], 2)
                         if save_results:
                             output_boxes[obj_id].append(state)
+                        
+                        # 通过 WebSocket 发送脱靶量信息（在独立线程中）
+                        if self.ws_sender.is_connected():
+                            # 计算图像中心
+                            image_h, image_w = frame.shape[:2]
+                            image_center_x = image_w / 2.0
+                            image_center_y = image_h / 2.0
+                            
+                            # 计算目标框的中心点
+                            target_center_x = state[0] + state[2] / 2.0
+                            target_center_y = state[1] + state[3] / 2.0
+                            
+                            # 计算脱靶量（相对于图像中心的偏移）
+                            offset_x = target_center_x - image_center_x
+                            offset_y = target_center_y - image_center_y
+                            
+                            self.ws_sender.send_offset(
+                                frame_number=frame_number,
+                                object_id=obj_id,
+                                offset_x=offset_x,
+                                offset_y=offset_y,
+                                center_x=target_center_x,
+                                center_y=target_center_y,
+                                image_width=image_w,
+                                image_height=image_h
+                            )
 
             # Put text
-            font_color = (255, 255, 255)
+            font_color = (0, 255, 0)
             msg = "Select target(s). Press 'r' to reset or 'q' to quit."
             #cv.rectangle(frame_disp, (5, 5), (630, 40), (50, 50, 50), -1)
             #cv.putText(frame_disp, msg, (10, 30), cv.FONT_HERSHEY_COMPLEX_SMALL, 1, font_color, 2)
 
             if videofilepath is not None:
-                msg = "Press SPACE to pause/resume the video."
+                #msg = "Press SPACE to pause/resume the video."
                 #cv.rectangle(frame_disp, (5, 50), (530, 90), (50, 50, 50), -1)
                 #cv.putText(frame_disp, msg, (10, 75), cv.FONT_HERSHEY_COMPLEX_SMALL, 1, font_color, 2)
+                progress = cap.get(cv2.CAP_PROP_POS_MSEC) / 1000
+                duration = cap.get(cv2.CAP_PROP_FRAME_COUNT) / cap.get(cv2.CAP_PROP_FPS)
+                time_progress = f'{progress:.3f}/{duration:.3f} target:{next_object_id-1}'
+                cv.putText(frame_disp, time_progress, (10, 30), cv.FONT_HERSHEY_COMPLEX_SMALL, 1, font_color, 1)
+            
+            elif rtsp_url is not None:
+                # RTSP 流显示帧数和目标数量
+                time_progress = f'Frame: {frame_number} Target: {next_object_id - 1}'
+                cv.putText(frame_disp, time_progress, (10, 30), cv.FONT_HERSHEY_COMPLEX_SMALL, 1, font_color, 1)
+                # 显示 RTSP 源
+                stream_name = rtsp_url.split('/')[-1] or 'RTSP Stream'
+                cv.putText(frame_disp, f'Source: {stream_name}', (10, 60), cv.FONT_HERSHEY_COMPLEX_SMALL, 0.8, font_color, 1)
 
             # Display the resulting frame
             cv.imshow(display_name, frame_disp)
@@ -472,7 +729,7 @@ class Tracker:
             if key == ord('q'):
                 break
             elif key == ord('r'):
-                next_object_id = 1
+                #next_object_id = 1
                 sequence_object_ids = []
                 prev_output = OrderedDict()
 
@@ -492,6 +749,10 @@ class Tracker:
             video_writer.release()
         cap.release()
         cv.destroyAllWindows()
+        
+        # 停止 WebSocket 发送线程
+        if self.ws_sender.is_connected():
+            self.ws_sender.stop()
 
         if save_results:
             if not os.path.exists(self.results_dir):
@@ -695,7 +956,7 @@ class Tracker:
             boxes = (state,)
 
         for i, box in enumerate(boxes, start=1):
-            col = _tracker_disp_colors[i]
+            col = _tracker_disp_colors[i%6]
             col = [float(c) / 255.0 for c in col]
             rect = patches.Rectangle((box[0], box[1]), box[2], box[3], linewidth=1, edgecolor=col, facecolor='none')
             self.ax.add_patch(rect)

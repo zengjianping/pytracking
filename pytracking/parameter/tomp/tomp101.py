@@ -12,7 +12,7 @@ def parameters():
     params.train_feature_size = 18
     params.feature_stride = 16
     params.image_sample_size = params.train_feature_size*params.feature_stride
-    params.search_area_scale = 5
+    params.search_area_scale = 3
     params.border_mode = 'inside_major'
     params.patch_max_scale_change = 1.5
 

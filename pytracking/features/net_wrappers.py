@@ -20,18 +20,25 @@ class NetWrapper:
             return None
         self._rec_iter += 1
         try:
+            
             ret_val = getattr(self.net, name)
         except Exception as e:
             self._rec_iter = 0
-            raise e
+            #raise e
         self._rec_iter = 0
         return ret_val
 
     def load_network(self):
         self.net = load_network(self.net_path, **self.net_kwargs)
         if self.use_gpu:
-            self.cuda()
-        self.eval()
+            self.net.cuda()
+        self.net.eval()
+
+        #self.get_backbone_head_feat = self.net.get_backbone_head_feat
+        #self.head = self.net.head
+        
+        #self.extract_classification_feat = self.net.extract_classification_feat
+        #self.dimp_classifier = self.net.dimp_classifier
 
     def initialize(self):
         self.load_network()
@@ -73,3 +80,4 @@ class NetWithBackbone(NetWrapper):
         Expects a float tensor image with pixel range [0, 255]."""
         im = self.preprocess_image(im)
         return self.net.extract_backbone_features(im)
+

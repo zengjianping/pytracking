@@ -86,7 +86,7 @@ class MultiObjectWrapper:
             if key == 'segmentation':
                 pass
             else:
-                out_merged[key] = {obj_id: out[key] for obj_id, out in out_all.items()}
+                out_merged[key] = {obj_id: out.get(key,0) for obj_id, out in out_all.items()}
 
         return out_merged
 

@@ -33,6 +33,7 @@ def main():
 
     args = parser.parse_args()
 
+    print(args)
     visdom_info = {'use_visdom': args.use_visdom, 'server': args.visdom_server, 'port': args.visdom_port}
     run_webcam(args.tracker_name, args.tracker_param, args.debug, visdom_info)
 
