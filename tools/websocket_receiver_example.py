@@ -165,8 +165,8 @@ class WebSocketOffsetReceiver:
                 try:
                     data = json.loads(message)
                     self.message_count += 1
-                    self.tracker.update(data)
-                    self.format_offset_message(data)
+                    #self.tracker.update(data)
+                    #self.format_offset_message(data)
                     
                 except json.JSONDecodeError as e:
                     self.log(f"JSON 解析错误: {e}", "ERROR")
@@ -193,6 +193,9 @@ class WebSocketOffsetReceiver:
                 self.log(f"  平均 X 偏移: {stats['avg_offset_x']} px")
                 self.log(f"  平均 Y 偏移: {stats['avg_offset_y']} px")
                 self.log("="*60)
+            
+            self.log("="*60)
+            self.log(data)
     
     async def start(self):
         """启动 WebSocket 服务器"""

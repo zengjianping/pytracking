@@ -67,8 +67,8 @@ class WebSocketSender:
                 self._send_message(message)
                 
             except Exception as e:
-                if self.running:
-                    print(f"[WebSocket] 队列获取错误: {e}")
+                #if self.running:
+                #    print(f"[WebSocket] 队列获取错误: {e}")
                 continue
     
     def _send_message(self, message):
@@ -81,8 +81,44 @@ class WebSocketSender:
             
         except Exception as e:
             print(f"[WebSocket] 发送失败: {e}")
-    
-    def send_offset(self, frame_number, object_id, offset_x, offset_y, center_x, center_y, 
+
+    def send_start(self, frame_number, object_state, object_id):
+        """
+        发送目标框起始信息
+        """
+        message = {
+            'msg': 'pc_track_ctrl',
+            'state': 0,
+            'x': float(object_state[0]),
+            'y': float(object_state[1]),
+            'w': float(object_state[2]),
+            'h': float(object_state[3])
+        }
+
+        try:
+            self.message_queue.put_nowait(message)
+        except Exception as e:
+            print(f"[WebSocket] 队列已满或其他错误: {e}")
+
+    def send_stop(self):
+        """
+        发送目标框结束信息
+        """
+        message = {
+            'msg': 'pc_track_ctrl',
+            'state': 1,
+            'x': 0,
+            'y': 0,
+            'w': 0,
+            'h': 0
+        }
+
+        try:
+            self.message_queue.put_nowait(message)
+        except Exception as e:
+            print(f"[WebSocket] 队列已满或其他错误: {e}")
+
+    def send_offset(self, frame_number, object_state, object_id, offset_x, offset_y, center_x, center_y,
                    image_width, image_height, confidence=None):
         """
         发送目标框脱靶量信息
@@ -97,32 +133,42 @@ class WebSocketSender:
             image_height: 图像高度
             confidence: 置信度（可选）
         """
-        message = {
-            'type': 'tracking_offset',
-            'frame_number': int(frame_number),
-            'object_id': int(object_id),
-            'offset': {
-                'x': float(offset_x),
-                'y': float(offset_y),
-                'distance': float(np.sqrt(offset_x**2 + offset_y**2))  # 欧氏距离
-            },
-            'target_center': {
-                'x': float(center_x),
-                'y': float(center_y)
-            },
-            'image_center': {
-                'x': float(image_width / 2),
-                'y': float(image_height / 2)
-            },
-            'image_size': {
-                'width': int(image_width),
-                'height': int(image_height)
-            },
-            'timestamp': time.time()
-        }
         
-        if confidence is not None:
-            message['confidence'] = float(confidence)
+        if False:
+            message = {
+                'type': 'tracking_offset',
+                'frame_number': int(frame_number),
+                'object_id': int(object_id),
+                'offset': {
+                    'x': float(offset_x),
+                    'y': float(offset_y),
+                    'distance': float(np.sqrt(offset_x**2 + offset_y**2))  # 欧氏距离
+                },
+                'target_center': {
+                    'x': float(center_x),
+                    'y': float(center_y)
+                },
+                'image_center': {
+                    'x': float(image_width / 2),
+                    'y': float(image_height / 2)
+                },
+                'image_size': {
+                    'width': int(image_width),
+                    'height': int(image_height)
+                },
+                'timestamp': time.time()
+            }
+            if confidence is not None:
+                message['confidence'] = float(confidence)
+        else:
+            message = {
+                'msg': 'pc_track_ctrl',
+                'state': 2,
+                'x': object_state[0],
+                'y': object_state[1],
+                'w': object_state[2],
+                'h': object_state[3]
+            }
         
         try:
             self.message_queue.put_nowait(message)
@@ -641,6 +687,10 @@ class Tracker:
                 info['init_object_ids'] = [next_object_id, ]
                 info['init_bbox'] = OrderedDict({next_object_id: init_state})
                 sequence_object_ids.append(next_object_id)
+
+                if self.ws_sender.is_connected():
+                    self.ws_sender.send_start(frame_number, init_state, next_object_id)
+
                 if save_results:
                     output_boxes[next_object_id] = [init_state, ]
                 next_object_id += 1
@@ -665,6 +715,7 @@ class Tracker:
                         cv.imwrite(self.results_dir + f"seg_{frame_number}.jpg", mask_image)
 
                 if 'target_bbox' in out:
+                    obj_idx = 0
                     for obj_id, state in out['target_bbox'].items():
                         state = [int(s) for s in state]
                         cv.rectangle(frame_disp, (state[0], state[1]), (state[2] + state[0], state[3] + state[1]),
@@ -673,7 +724,7 @@ class Tracker:
                             output_boxes[obj_id].append(state)
                         
                         # 通过 WebSocket 发送脱靶量信息（在独立线程中）
-                        if self.ws_sender.is_connected():
+                        if obj_idx == 0 and self.ws_sender.is_connected():
                             # 计算图像中心
                             image_h, image_w = frame.shape[:2]
                             image_center_x = image_w / 2.0
@@ -689,6 +740,7 @@ class Tracker:
                             
                             self.ws_sender.send_offset(
                                 frame_number=frame_number,
+                                object_state=state,
                                 object_id=obj_id,
                                 offset_x=offset_x,
                                 offset_y=offset_y,
@@ -697,6 +749,7 @@ class Tracker:
                                 image_width=image_w,
                                 image_height=image_h
                             )
+                        obj_idx += 1
 
             # Put text
             font_color = (0, 255, 0)
@@ -725,9 +778,11 @@ class Tracker:
             cv.imshow(display_name, frame_disp)
             if video_writer is not None and not paused:
                 video_writer.write(frame_disp)
+
             key = cv.waitKey(1)
             if key == ord('q'):
                 break
+
             elif key == ord('r'):
                 #next_object_id = 1
                 sequence_object_ids = []
@@ -740,6 +795,10 @@ class Tracker:
                 info['init_bbox'] = OrderedDict()
                 tracker.initialize(frame, info)
                 ui_control.mode = 'init'
+                
+                if self.ws_sender.is_connected():
+                    self.ws_sender.send_stop()
+
             # 'Space' to pause video
             elif key == 32 and videofilepath is not None:
                 paused = not paused
@@ -752,6 +811,7 @@ class Tracker:
         
         # 停止 WebSocket 发送线程
         if self.ws_sender.is_connected():
+            self.ws_sender.send_stop()
             self.ws_sender.stop()
 
         if save_results:
