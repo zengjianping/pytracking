@@ -1,4 +1,8 @@
 #!/bin/bash
+
+RTSP_URL="rtsp://localhost:8554/live"
+WSCK_URL="ws://localhost:8765"
+
 ALGO="keep_track-default_fast"
 #ALGO="tomp-tomp50"
 #ALGO="tomp-tomp101"
@@ -11,6 +15,6 @@ tracker_param=${arr[1]}
 python3 tools/run_tracker_with_rtsp.py \
     --tracker-name $tracker_name \
     --param-name $tracker_param \
-    --rtsp-url rtsp://localhost:8554/live \
-    --ws-url ws://localhost:8765
+    --rtsp-url $RTSP_URL \
+    --ws-url $WSCK_URL
 
