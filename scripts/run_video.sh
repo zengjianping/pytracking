@@ -1,12 +1,12 @@
 #!/bin/bash
-#ALGO="keep_track-default_fast"
-#ALGO="rts-rts50"
+ALGO="keep_track-default"
+#ALGO="tomp-tomp50"
+#ALGO="tomp-tomp101"
+#ALGO="dimp-dimp50"
+#ALGO="rts-rts50" xxx
 #ALGO="lwl-lwl_boxinit"
 #ALGO="eco-default"
 #ALGO="atom-default"
-ALGO="tomp-tomp50"
-#ALGO="tomp-tomp101"
-#ALGO="dimp-dimp50"
 
 arr=(${ALGO//-/ })
 tracker_name=${arr[0]}

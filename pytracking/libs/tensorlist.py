@@ -182,7 +182,29 @@ class TensorList(list):
     @staticmethod
     def _iterable(a):
         return isinstance(a, (TensorList, list))
-
+    
+    @classmethod
+    def __torch_function1__(cls, func, types, args=(), kwargs=None):
+        # For autograd.grad, extract tensors from TensorList
+        if func is torch.autograd.grad:
+            # Flatten TensorList arguments to regular lists
+            new_args = []
+            for arg in args:
+                if isinstance(arg, TensorList):
+                    new_args.append(list(arg))
+                elif isinstance(arg, (list, tuple)):
+                    new_args.append([
+                        list(a) if isinstance(a, TensorList) else a 
+                        for a in arg
+                    ])
+                else:
+                    new_args.append(arg)
+            return func(*new_args, **(kwargs or {}))
+        
+        # Default behavior for other ops
+        if kwargs is None:
+            kwargs = {}
+        return super().__torch_function__(func, types, args, kwargs)
 
 
 def tensor_operation(op):

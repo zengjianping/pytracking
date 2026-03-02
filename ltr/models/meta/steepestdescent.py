@@ -67,18 +67,10 @@ class GNSteepestDescent(nn.Module):
 
             # Compute gradient of loss
             u = r.clone()
-            # 正确写法：转换为原生张量
-            #params = list(meta_parameter)
-            # 方式1：用 .data 或 .detach()（仅当不需要保留梯度链路时）
-            # 注意：.data 会脱离计算图，仅获取张量值
-            #native_params = [p.detach() for p in params]
-            # 方式2：用 torch.as_tensor 转换（保留梯度链路，推荐）
-            #native_params = [torch.as_tensor(p, device=p.device) for p in params]
-            #g = TensorList(torch.autograd.grad(r, native_params, u, create_graph=True))
-            g = TensorList(torch.autograd.grad(r, meta_parameter, u, create_graph=True))
+            g = TensorList(torch.autograd.grad(list(r), list(meta_parameter), list(u), create_graph=True))
 
             # Multiply gradient with Jacobian
-            h = TensorList(torch.autograd.grad(g, u, g, create_graph=True))
+            h = TensorList(torch.autograd.grad(list(g), list(u), list(g), create_graph=True))
 
             # Compute squared norms
             ip_gg = self._sqr_norm(g, batch_dim=self._parameter_batch_dim)

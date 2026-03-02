@@ -248,7 +248,7 @@ class ConjugateGradient(ConjugateGradientBase):
         self.g.requires_grad_(True)
 
         # Get df/dx^t @ f0
-        self.dfdxt_g = TensorList(torch.autograd.grad(self.f0, self.x, self.g, create_graph=True))
+        self.dfdxt_g = TensorList(torch.autograd.grad(list(self.f0), list(self.x), list(self.g), create_graph=True))
 
         # Get the right hand side
         self.b = - self.dfdxt_g.detach()
@@ -276,8 +276,8 @@ class ConjugateGradient(ConjugateGradientBase):
 
 
     def A(self, x):
-        dfdx_x = torch.autograd.grad(self.dfdxt_g, self.g, x, retain_graph=True)
-        return TensorList(torch.autograd.grad(self.f0, self.x, dfdx_x, retain_graph=True))
+        dfdx_x = torch.autograd.grad(list(self.dfdxt_g), list(self.g), list(x), retain_graph=True)
+        return TensorList(torch.autograd.grad(list(self.f0), list(self.x), dfdx_x, retain_graph=True))
 
     def ip(self, a, b):
         return self.problem.ip_input(a, b)
@@ -392,7 +392,7 @@ class GaussNewtonCG(ConjugateGradientBase):
         self.g.requires_grad_(True)
 
         # Get df/dx^t @ f0
-        self.dfdxt_g = TensorList(torch.autograd.grad(self.f0, self.x, self.g, create_graph=True))
+        self.dfdxt_g = TensorList(torch.autograd.grad(list(self.f0), list(self.x), list(self.g), create_graph=True))
 
         # Get the right hand side
         self.b = - self.dfdxt_g.detach()
@@ -408,8 +408,8 @@ class GaussNewtonCG(ConjugateGradientBase):
 
 
     def A(self, x):
-        dfdx_x = torch.autograd.grad(self.dfdxt_g, self.g, x, retain_graph=True)
-        return TensorList(torch.autograd.grad(self.f0, self.x, dfdx_x, retain_graph=True))
+        dfdx_x = torch.autograd.grad(list(self.dfdxt_g), list(self.g), list(x), retain_graph=True)
+        return TensorList(torch.autograd.grad(list(self.f0), list(self.x), dfdx_x, retain_graph=True))
 
     def ip(self, a, b):
         return self.problem.ip_input(a, b)
@@ -482,7 +482,7 @@ class GradientDescentL2:
             loss = self.problem.ip_output(self.f0, self.f0)
 
             # Compute grad
-            grad = TensorList(torch.autograd.grad(loss, self.x))
+            grad = TensorList(torch.autograd.grad(loss, list(self.x)))
 
             # Update direction
             if self.dir is None:
@@ -501,7 +501,7 @@ class GradientDescentL2:
             self.x.requires_grad_(True)
             self.f0 = self.problem(self.x)
             loss = self.problem.ip_output(self.f0, self.f0)
-            grad = TensorList(torch.autograd.grad(loss, self.x))
+            grad = TensorList(torch.autograd.grad(loss, list(self.x)))
             lossvec[-1] = self.problem.ip_output(self.f0, self.f0).item()
             grad_mags[-1] = sum(grad.view(-1) @ grad.view(-1)).cpu().sqrt().item()
             self.losses = torch.cat((self.losses, lossvec))
@@ -597,7 +597,7 @@ class NewtonCG(ConjugateGradientBase):
             self.losses = torch.cat((self.losses, self.f0.detach().cpu().view(-1)))
 
         # Gradient of loss
-        self.g = TensorList(torch.autograd.grad(self.f0, self.x, create_graph=True))
+        self.g = TensorList(torch.autograd.grad(list(self.f0), list(self.x), create_graph=True))
 
         # Get the right hand side
         self.b = - self.g.detach()
@@ -613,7 +613,7 @@ class NewtonCG(ConjugateGradientBase):
 
 
     def A(self, x):
-        return TensorList(torch.autograd.grad(self.g, self.x, x, retain_graph=True)) + self.hessian_reg * x
+        return TensorList(torch.autograd.grad(list(self.g), list(self.x), list(x), retain_graph=True)) + self.hessian_reg * x
 
     def ip(self, a, b):
         # Implements the inner product
@@ -683,7 +683,7 @@ class GradientDescent:
             loss = self.problem(self.x)
 
             # Compute grad
-            grad = TensorList(torch.autograd.grad(loss, self.x))
+            grad = TensorList(torch.autograd.grad(loss, list(self.x)))
 
             # Update direction
             if self.dir is None:
@@ -701,7 +701,7 @@ class GradientDescent:
         if self.debug:
             self.x.requires_grad_(True)
             loss = self.problem(self.x)
-            grad = TensorList(torch.autograd.grad(loss, self.x))
+            grad = TensorList(torch.autograd.grad(loss, list(self.x)))
             lossvec[-1] = loss.item()
             grad_mags[-1] = sum(grad.view(-1) @ grad.view(-1)).cpu().sqrt().item()
             self.losses = torch.cat((self.losses, lossvec))

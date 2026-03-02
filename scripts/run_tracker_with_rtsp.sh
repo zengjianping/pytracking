@@ -1,10 +1,6 @@
 #!/bin/bash
-#ALGO="keep_track-default_fast"
-#ALGO="rts-rts50"
-#ALGO="lwl-lwl_boxinit"
-#ALGO="eco-default"
-#ALGO="atom-default"
-ALGO="tomp-tomp50"
+ALGO="keep_track-default_fast"
+#ALGO="tomp-tomp50"
 #ALGO="tomp-tomp101"
 #ALGO="dimp-dimp50"
 
