@@ -10,5 +10,5 @@ conda activate pytracking
 
 pip install torch torchvision torchaudio
 
-pip install numpy matplotlib pandas tqdm opencv-python tb-nightly visdom scikit-image tikzplotlib gdown cython pycocotools lvis jpeg4py
+pip install numpy matplotlib pandas tqdm opencv-python tb visdom scikit-image tikzplotlib gdown cython pycocotools lvis jpeg4py PyYAML
 
