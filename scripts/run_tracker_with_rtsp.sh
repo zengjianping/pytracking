@@ -3,8 +3,8 @@
 RTSP_URL="rtsp://localhost:8554/live"
 WSCK_URL="ws://localhost:8765"
 
-ALGO="keep_track-default_fast"
-#ALGO="tomp-tomp50"
+#ALGO="keep_track-default"
+ALGO="tomp-tomp50"
 #ALGO="tomp-tomp101"
 #ALGO="dimp-dimp50"
 
