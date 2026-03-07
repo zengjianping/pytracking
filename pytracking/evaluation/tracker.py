@@ -55,6 +55,8 @@ class WebSocketSender:
     
     def _send_worker(self):
         """发送线程的工作函数"""
+
+        ws = None
         while self.running:
             try:
                 # 从队列获取消息（带超时以便定期检查 running 状态）
@@ -63,21 +65,34 @@ class WebSocketSender:
                 if message is None:  # None 作为停止信号
                     break
 
+                if not message['msg'] == 'pc_track_ctrl':
+                    continue
+
+                if message['is_start'] == 0:
+                    if ws is not None:
+                        ws.close()
+                        ws = None
+                if ws is None:
+                    ws = websocket.create_connection(self.ws_url, timeout=5)
+
                 #print(f"[WebSocket] 发送消息: {message}")
-                self._send_message(message)
+                self._send_message(ws, message)
+
+                if message['is_start'] == 1:
+                    if ws is not None:
+                        ws.close()
+                        ws = None
                 
             except Exception as e:
                 #if self.running:
                 #    print(f"[WebSocket] 队列获取错误: {e}")
                 continue
     
-    def _send_message(self, message):
+    def _send_message(self, ws, message):
         """发送单个消息到 WebSocket 服务器"""
         try:
             # 连接到 WebSocket 服务器
-            ws = websocket.create_connection(self.ws_url, timeout=5)
             ws.send(json.dumps(message))
-            ws.close()
             
         except Exception as e:
             print(f"[WebSocket] 发送失败: {e}")
@@ -88,7 +103,7 @@ class WebSocketSender:
         """
         message = {
             'msg': 'pc_track_ctrl',
-            'state': 0,
+            'is_start': 0,
             'x': float(object_state[0]),
             'y': float(object_state[1]),
             'w': float(object_state[2]),
@@ -106,7 +121,7 @@ class WebSocketSender:
         """
         message = {
             'msg': 'pc_track_ctrl',
-            'state': 1,
+            'is_start': 1,
             'x': 0,
             'y': 0,
             'w': 0,
@@ -163,7 +178,7 @@ class WebSocketSender:
         else:
             message = {
                 'msg': 'pc_track_ctrl',
-                'state': 2,
+                'is_start': 2,
                 'x': object_state[0],
                 'y': object_state[1],
                 'w': object_state[2],

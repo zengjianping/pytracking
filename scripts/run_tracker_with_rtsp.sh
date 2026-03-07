@@ -1,7 +1,10 @@
 #!/bin/bash
 
-RTSP_URL="rtsp://localhost:8554/live"
-WSCK_URL="ws://localhost:8765"
+#RTSP_URL="rtsp://localhost:8554/live"
+#WSCK_URL="ws://localhost:8765"
+
+RTSP_URL="rtsp://192.168.1.90:8554/ir/video"
+WSCK_URL="ws://192.168.1.90:12345"
 
 #ALGO="keep_track-default"
 ALGO="tomp-tomp50"
